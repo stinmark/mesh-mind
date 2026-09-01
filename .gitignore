@@ -1,1 +1,18 @@
 terraform/terraform.tfvars
+
+# Ignore model files and directories
+models/
+*.gguf
+*.bin
+*.onnx
+*.pt
+*.safetensors
+
+# Ignore virtual environments
+venv/
+.venv/
+
+# Ignore SQLite database files
+*.db
+*.db-journal
+*.db-wal

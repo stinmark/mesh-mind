@@ -1,0 +1,174 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Mesh Mind</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        max-width: 600px;
+        margin: 30px auto;
+        padding: 20px;
+        background: #121212;
+        color: #fff;
+      }
+      input,
+      button {
+        padding: 10px;
+        margin: 5px 0;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      button {
+        background: #0070f3;
+        color: white;
+        border: none;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .box {
+        border: 1px solid #333;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+      #chat-output {
+        min-height: 80px;
+        background: #1e1e1e;
+        padding: 10px;
+        border-radius: 4px;
+        white-space: pre-wrap;
+      }
+      .cursor {
+        display: inline-block;
+        width: 8px;
+        height: 15px;
+        background: #0070f3;
+        margin-left: 2px;
+        animation: blink 0.8s infinite;
+      }
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h2>🧠 Mesh Mind Interface</h2>
+
+    <div id="auth-box" class="box">
+      <h3>Login / Register</h3>
+      <input id="user" placeholder="Username" />
+      <input id="pass" type="password" placeholder="Password" />
+      <button onclick="auth('/api/login')">Login</button>
+      <button onclick="auth('/api/register')" style="background: #333">
+        Register
+      </button>
+    </div>
+
+    <div id="app-box" class="box" style="display: none">
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        "
+      >
+        <span>Tokens Left: <b id="token-count">0</b></span>
+        <button
+          onclick="buyTokens()"
+          style="width: auto; padding: 5px 10px; background: #10b981"
+        >
+          + Buy 20 Dummy Tokens
+        </button>
+      </div>
+      <hr style="border-color: #333; margin: 15px 0" />
+      <input id="prompt" placeholder="Ask SmolLM2..." />
+      <button onclick="sendPrompt()">Send Query (1 Token)</button>
+      <h4>Response:</h4>
+      <div id="chat-output">
+        <span id="text"></span
+        ><span id="cursor" class="cursor" style="display: none"></span>
+      </div>
+    </div>
+
+    <script>
+      let token = localStorage.getItem("jwt");
+
+      if (token) showApp();
+
+      async function auth(url) {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user.value, password: pass.value }),
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          token = data.token;
+          localStorage.setItem("jwt", token);
+          document.getElementById("token-count").innerText = data.tokens;
+          showApp();
+        } else {
+          alert(data.error || data.message);
+        }
+      }
+
+      function showApp() {
+        document.getElementById("auth-box").style.display = "none";
+        document.getElementById("app-box").style.display = "block";
+      }
+
+      async function buyTokens() {
+        const res = await fetch("/api/buy-tokens", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token },
+        });
+        const data = await res.json();
+        if (res.ok)
+          document.getElementById("token-count").innerText = data.tokens;
+      }
+
+      async function sendPrompt() {
+        const textEl = document.getElementById("text");
+        const cursorEl = document.getElementById("cursor");
+        textEl.innerText = "";
+        cursorEl.style.display = "inline-block";
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + token,
+          },
+          body: JSON.stringify({ prompt: prompt.value }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          textEl.innerText = data.error || "Error generating response";
+          cursorEl.style.display = "none";
+          return;
+        }
+
+        document.getElementById("token-count").innerText = data.tokens;
+
+        let fullText = data.response;
+        let i = 0;
+        let timer = setInterval(() => {
+          if (i < fullText.length) {
+            textEl.innerText += fullText.charAt(i);
+            i++;
+          } else {
+            clearInterval(timer);
+            cursorEl.style.display = "none";
+          }
+        }, 20);
+      }
+    </script>
+  </body>
+</html>
