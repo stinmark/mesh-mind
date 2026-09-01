@@ -109,11 +109,12 @@ func HandleChat(w http.ResponseWriter, r *http.Request, username string) {
 
 	payload, _ := json.Marshal(map[string]interface{}{
 		"messages": []map[string]string{
+			{"role": "system", "content": "You are a helpful, concise AI assistant."},
 			{"role": "user", "content": chatReq.Prompt},
 		},
 		"max_new_tokens": 150,
+		"temperature":    0.7,
 	})
-
 	resp, err := http.Post(InferenceURL+"/v1/chat/completions", "application/json", bytes.NewBuffer(payload))
 	if err != nil {
 		http.Error(w, `{"error":"Inference service offline"}`, http.StatusServiceUnavailable)

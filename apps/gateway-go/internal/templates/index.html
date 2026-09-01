@@ -132,8 +132,12 @@
         if (res.ok)
           document.getElementById("token-count").innerText = data.tokens;
       }
-
       async function sendPrompt() {
+        const promptInput = document.getElementById("prompt");
+        const promptValue = promptInput.value.trim();
+
+        if (!promptValue) return;
+
         const textEl = document.getElementById("text");
         const cursorEl = document.getElementById("cursor");
         textEl.innerText = "";
@@ -145,10 +149,13 @@
             "Content-Type": "application/json",
             Authorization: "Bearer " + token,
           },
-          body: JSON.stringify({ prompt: prompt.value }),
+          body: JSON.stringify({ prompt: promptValue }),
         });
-        const data = await res.json();
 
+        // Clear input field after sending
+        promptInput.value = "";
+
+        const data = await res.json();
         if (!res.ok) {
           textEl.innerText = data.error || "Error generating response";
           cursorEl.style.display = "none";
@@ -167,7 +174,7 @@
             clearInterval(timer);
             cursorEl.style.display = "none";
           }
-        }, 20);
+        }, 15);
       }
     </script>
   </body>
