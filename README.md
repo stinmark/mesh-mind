@@ -1,5 +1,3 @@
-Here is a complete, production-ready `README.md` for **Mesh-Mind** that highlights your Go Gateway, Python ONNX inference engine, CLI with SQLite local storage, and server-side SQLite authentication setup.
-
 ---
 
 ```markdown
