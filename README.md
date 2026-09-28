@@ -1,11 +1,8 @@
----
-
-```markdown
 # 🧠 Mesh-Mind
 
-> An ultra-lightweight, modular MLOps pipeline and API Gateway designed for high-performance model routing, local developer productivity, and low-latency inference.
+> An ultra-lightweight, modular MLOps pipeline and API Gateway designed for intelligent model routing, local developer productivity, and low-latency ONNX inference.
 
-Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a **Go Terminal CLI**. It features dual-layer SQLite persistence: client-side SQLite for local CLI state and history, and server-side SQLite for user authentication and activity logs.
+Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and an interactive **Go Terminal CLI**. It features smart model routing (auto-selection based on query intent or explicit user overrides) and dual-layer SQLite persistence.
 
 ---
 
@@ -17,29 +14,29 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
 │                                                                 │
 │  Mesh-Mind CLI (Go + Cobra)                                     │
 │  └── Storage: Local SQLite (~/.mesh-mind/config.db)             │
-│      ├── Settings (Gateway URL, JWT Tokens)                     │
+│      ├── Settings (Gateway URL, Saved JWT Token)                │
 │      └── Prediction History & Latency Logs                      │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
-                                 │ HTTP REST API Request
-                                 │ Header: "Authorization: Bearer <JWT>"
+                                 │ HTTP POST /api/v1/predict
+                                 │ Body: { "text": "...", "model": "auto" }
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLOUD / SERVER                          │
 │                                                                 │
 │  Go API Gateway & Router                                        │
-│  ├── Auth Middleware (JWT Verification)                         │
+│  ├── JWT Authentication Middleware                              │
+│  ├── Dynamic Router Engine (Auto-Detect vs. Explicit Override)  │
 │  └── Storage: Server SQLite (/data/gateway.db)                  │
-│      ├── User Credentials & bcrypt Passwords                    │
-│      └── User Activity Tracking                                 │
+│      └── User Credentials (bcrypt) & Activity Logs              │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
-                                 │ Internal Routing / Inter-Process Call
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Python ONNX Model Workers                                      │
-│  └── High-Performance Sentiment & Intent Inference              │
-└─────────────────────────────────────────────────────────────────┘
+                   ┌─────────────┴─────────────┐
+                   ▼                           ▼
+┌────────────────────────────┐   ┌────────────────────────────┐
+│ Python ONNX Sentiment      │   │ Python ONNX Intent         │
+│ Model Worker               │   │ Model Worker               │
+└────────────────────────────┘   └────────────────────────────┘
 
 ```
 
@@ -47,16 +44,16 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
 
 ## ✨ Features
 
-* **🚀 Go API Gateway:** High-throughput, stateless routing engine with custom JWT middleware.
-* **⚡ ONNX Model Runtime:** Rapid Python-backed inference optimized for intent and sentiment routing.
-* **💻 Interactive Terminal CLI:** Built using Cobra for intuitive developer workflows.
+* **🔀 Smart Model Routing:** Automatically evaluates incoming text to dispatch queries to the optimal model worker, or allows clients to explicitly target specific models via `--model` flags.
+* **🚀 Go API Gateway:** High-throughput, stateless routing engine with custom JWT authentication middleware.
+* **⚡ ONNX Model Runtime:** Rapid Python-backed inference optimized for intent classification and sentiment analysis.
+* **💻 Interactive Terminal CLI:** Built with Cobra for seamless terminal workflows.
 * **💾 Dual-Layer SQLite Persistence:**
-* **Client-Side (`~/.mesh-mind/config.db`):** Stores user tokens, endpoints, and local query logs for offline inspection.
-* **Server-Side (`/data/gateway.db`):** Light, zero-dependency user registration, password hashing (`bcrypt`), and token issuing.
+* **Client-Side (`~/.mesh-mind/config.db`):** Stores JWT tokens, server configuration, and local query execution history for offline auditing.
+* **Server-Side (`/data/gateway.db`):** Handles user registration, `bcrypt` password hashing, and token validation.
 
 
-* **🔓 Developer-Friendly Auth Toggle:** Disable authentication with `DISABLE_AUTH=true` for instant local testing.
-* **🌐 Web Ready:** Clean REST endpoints with CORS support, prepared for a React/Next.js frontend.
+* **🔓 Developer Auth Toggle:** Disable authentication checks during development by setting `DISABLE_AUTH=true`.
 
 ---
 
@@ -67,12 +64,13 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
 ├── cmd/
 │   └── mesh-mind/         # Binary entrypoint for the CLI
 ├── internal/              # Shared CLI internal modules
-│   ├── cli/               # Cobra CLI commands (predict, register, login, history)
-│   ├── config/            # SQLite initialization (pure Go modernc.org/sqlite)
+│   ├── cli/               # Cobra CLI commands (register, login, predict, history, config)
+│   ├── config/            # Pure Go SQLite initialization (modernc.org/sqlite)
 │   └── store/             # Local SQLite Data Access Objects (Config & History)
-├── gateway/               # Go API Gateway
+├── gateway/               # Go API Gateway & Smart Router
 │   ├── internal/auth/     # JWT authentication middleware & handlers
-│   └── internal/db/       # Gateway SQLite schema & user store
+│   ├── internal/handlers/ # Predict & routing handlers
+│   └── internal/db/       # Server SQLite schema & user repository
 ├── models/                # Python ONNX inference services
 ├── docker-compose.yml     # Multi-container orchestration
 └── README.md
@@ -86,11 +84,11 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
 ### 1. Prerequisites
 
 * **Go** (v1.21 or higher)
-* **Docker & Docker Compose** (for Gateway & Model services)
+* **Docker & Docker Compose**
 
-### 2. Start the Gateway & Inference Workers
+### 2. Start Services
 
-Clone the repository and run the services with Docker Compose:
+Clone the repository and spin up the gateway and inference workers:
 
 ```bash
 git clone [https://github.com/your-username/mesh-mind.git](https://github.com/your-username/mesh-mind.git)
@@ -99,9 +97,9 @@ docker-compose up -d --build
 
 ```
 
-### 3. Build & Run the CLI
+### 3. Build the CLI Binary
 
-Build the pure Go CLI binary (no CGO compiler required):
+Build the pure Go CLI binary (no CGO/GCC compiler required):
 
 ```bash
 go build -o mesh-mind ./cmd/mesh-mind
@@ -112,52 +110,101 @@ go build -o mesh-mind ./cmd/mesh-mind
 
 ## 💻 CLI Usage Walkthrough
 
-### Step 1: Set Up Target Gateway URL
+### 1. Set Gateway Target
 
 ```bash
 ./mesh-mind config set-url http://localhost:8080
-# Output: ✔ Default Gateway URL set to: http://localhost:8080
+# Output: ✔ Gateway URL set to: http://localhost:8080
 
 ```
 
-### Step 2: Create an Account & Log In
+### 2. Register & Authenticate
 
 ```bash
-# Register a new user
+# Register a new account
 ./mesh-mind register -u devuser -p supersecret
 # Output: ✔ Account created successfully!
 
-# Authenticate and receive a JWT token (saved to local SQLite)
+# Log in and store JWT locally
 ./mesh-mind login -u devuser -p supersecret
 # Output: ✔ Login successful!
 # Output: ✔ JWT token saved to local SQLite database (~/.mesh-mind/config.db)
 
 ```
 
-### Step 3: Execute Model Predictions
+### 3. Execute Model Predictions
+
+#### Option A: Automatic Model Routing (Default)
+
+Let the Gateway automatically detect the query type and route it to the appropriate ONNX model worker:
 
 ```bash
-./mesh-mind predict "Great customer service, solved my issue fast!"
+./mesh-mind predict "How do I reset my account password?"
 
 # 🧠 Model Output:
-#    Intent:     support
-#    Sentiment:  positive
-#    Model Used: onnx-sentiment-int8
-#    Latency:    18.40 ms
-# 
-# Saved to local SQLite history.
+#    Text:       "How do I reset my account password?"
+#    Model Used: onnx-intent-v1 (auto-routed)
+#    Intent:     account_recovery
+#    Latency:    12.40 ms
 
 ```
 
-### Step 4: Query Local History (Offline)
+#### Option B: Explicit Model Override (`--model` / `-m`)
+
+Bypass auto-detection and force the request to execute against a specific target model (`sentiment`, `intent`):
+
+```bash
+./mesh-mind predict "The new update solved all my issues!" --model sentiment
+
+# 🧠 Model Output:
+#    Text:       "The new update solved all my issues!"
+#    Model Used: onnx-sentiment-v1 (forced target)
+#    Sentiment:  positive
+#    Latency:    9.80 ms
+
+```
+
+### 4. Query Local History
+
+Inspect previously run queries and execution metrics stored in your local SQLite database:
 
 ```bash
 ./mesh-mind history --limit 5
 
-# 📜 Last 1 Local Predictions:
+# 📜 Last Predictions:
 # ---------------------------------------------------------------------
-# [2026-09-28 16:30:00] Text: "Great customer service, solved my issue fast!"
-#    └─ Intent: support | Sentiment: positive | Model: onnx-sentiment-int8 (18.4 ms)
+# [2026-09-28 16:30:00] Text: "How do I reset my account password?"
+#    └─ Model: onnx-intent-v1 | Intent: account_recovery | Latency: 12.4 ms
+# [2026-09-28 16:31:12] Text: "The new update solved all my issues!"
+#    └─ Model: onnx-sentiment-v1 | Sentiment: positive | Latency: 9.8 ms
+
+```
+
+---
+
+## ⚙️ REST API Endpoint
+
+If accessing the gateway directly via HTTP:
+
+**`POST /api/v1/predict`**
+
+```json
+// Request Body
+{
+  "text": "Where is my order package?",
+  "model": "auto"  // Acceptable values: "auto", "sentiment", "intent"
+}
+
+```
+
+```json
+// Response Body
+{
+  "text": "Where is my order package?",
+  "model_used": "onnx-intent-v1",
+  "intent": "order_tracking",
+  "latency_ms": 11.20
+}
 
 ```
 
@@ -165,20 +212,10 @@ go build -o mesh-mind ./cmd/mesh-mind
 
 ## 🔒 Security & Authentication
 
-* **Password Hashing:** User passwords are encrypted using `bcrypt` on the server before being saved to SQLite.
-* **Stateless Verification:** Model routes are secured via JWT bearer tokens signed with HS256 algorithm.
-* **Local Client Isolation:** Auth credentials and local query history remain inside the developer's home directory (`~/.mesh-mind/config.db`), preventing leakage between users.
-* **Bypass Auth for Testing:** Set the environment variable `DISABLE_AUTH=true` in `gateway/.env` to run the stack without authentication checks.
-
----
-
-## 🛣️ Roadmap
-
-* [x] Go API Gateway with JWT Auth
-* [x] Python ONNX Model Worker Integration
-* [x] Pure Go CLI with SQLite Persistent Storage
-* [ ] Add Web Dashboard (React/Next.js)
-* [ ] gRPC Transport between Gateway and ONNX Workers
+* **Password Hashing:** User passwords are encrypted using `bcrypt` on the server before storage.
+* **Stateless Authorization:** Routes are protected via JWT bearer tokens signed with HS256.
+* **Client Storage Isolation:** Auth tokens and local query logs are isolated inside `~/.mesh-mind/config.db`.
+* **Bypass Auth Mode:** Set `DISABLE_AUTH=true` in `gateway/.env` to run local tests without login requirements.
 
 ---
 
@@ -186,12 +223,3 @@ go build -o mesh-mind ./cmd/mesh-mind
 
 Distributed under the MIT License. See `LICENSE` for details.
 
-```
-
-<ElicitationsGroup message="Where would you like to go next with Mesh-Mind?">
-  <Elicitation label="Create a docker-compose.yml file for the Gateway and Python services" query="Create a complete docker-compose.yml file that spins up the Go Gateway and Python ONNX model workers with local persistent storage."/>
-  <Elicitation label="Add unit tests for the Go CLI and SQLite stores" query="Write unit tests for the CLI SQLite storage implementations in internal/store using Go's standard testing package."/>
-  <Elicitation label="Build a lightweight React frontend dashboard" query="Show me how to build a simple React single-page frontend that connects to the Go Gateway for real-time predictions."/>
-</ElicitationsGroup>
-
-```
