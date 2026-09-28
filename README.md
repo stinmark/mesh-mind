@@ -1,156 +1,199 @@
-Here is the updated root `README.md` covering the full project architecture, setup steps for both `gateway-go` and `inference-py`, and deployment guidelines for AWS Free Tier EC2.
-
-````markdown
-# 🧠 MESH MIND
-
-A lightweight, low-memory AI platform designed to run within the **AWS Free Tier (1 vCPU, 1 GiB RAM)**.
-
-Mesh Mind uses an embedded SQLite database, a compiled Go API gateway serving a dynamic frontend, and a Python inference service leveraging GGUF quantization (`llama-cpp-python`) to keep total system memory usage under **250 MB RAM**.
+Here is a complete, production-ready `README.md` for **Mesh-Mind** that highlights your Go Gateway, Python ONNX inference engine, CLI with SQLite local storage, and server-side SQLite authentication setup.
 
 ---
 
-## 🏗 Architecture & Memory Footprint
+```markdown
+# 🧠 Mesh-Mind
+
+> An ultra-lightweight, modular MLOps pipeline and API Gateway designed for high-performance model routing, local developer productivity, and low-latency inference.
+
+Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a **Go Terminal CLI**. It features dual-layer SQLite persistence: client-side SQLite for local CLI state and history, and server-side SQLite for user authentication and activity logs.
+
+---
+
+## 🏗️ Architecture Overview
 
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│              AWS EC2 Instance (t2.micro / t3.micro: 1 GiB RAM)          │
-│                                                                        │
-│  ┌─────────────────────────────────┐   ┌────────────────────────────┐  │
-│  │ gateway-go (Port 8080)          │   │ inference-py (Port 8000)   │  │
-│  │ - JWT Auth & Dummy Token Store  │   │ - FastAPI + llama-cpp      │  │
-│  │ - Embedded HTML/JS UI           │ ─ │ - SmolLM2-135M-Instruct    │  │
-│  │ - Embedded SQLite (mesh_mind.db)│   │   (Q4_K_M GGUF Binary)     │  │
-│  │ ~30 MB RAM                      │   │ ~180 MB RAM                │  │
-│  └─────────────────────────────────┘   └────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                          LOCAL CLIENT                           │
+│                                                                 │
+│  Mesh-Mind CLI (Go + Cobra)                                     │
+│  └── Storage: Local SQLite (~/.mesh-mind/config.db)             │
+│      ├── Settings (Gateway URL, JWT Tokens)                     │
+│      └── Prediction History & Latency Logs                      │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                                 │ HTTP REST API Request
+                                 │ Header: "Authorization: Bearer <JWT>"
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLOUD / SERVER                          │
+│                                                                 │
+│  Go API Gateway & Router                                        │
+│  ├── Auth Middleware (JWT Verification)                         │
+│  └── Storage: Server SQLite (/data/gateway.db)                  │
+│      ├── User Credentials & bcrypt Passwords                    │
+│      └── User Activity Tracking                                 │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                                 │ Internal Routing / Inter-Process Call
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Python ONNX Model Workers                                      │
+│  └── High-Performance Sentiment & Intent Inference              │
+└─────────────────────────────────────────────────────────────────┘
+
 ```
-````
 
 ---
 
-## 📁 Repository Structure
+## ✨ Features
+
+* **🚀 Go API Gateway:** High-throughput, stateless routing engine with custom JWT middleware.
+* **⚡ ONNX Model Runtime:** Rapid Python-backed inference optimized for intent and sentiment routing.
+* **💻 Interactive Terminal CLI:** Built using Cobra for intuitive developer workflows.
+* **💾 Dual-Layer SQLite Persistence:**
+* **Client-Side (`~/.mesh-mind/config.db`):** Stores user tokens, endpoints, and local query logs for offline inspection.
+* **Server-Side (`/data/gateway.db`):** Light, zero-dependency user registration, password hashing (`bcrypt`), and token issuing.
+
+
+* **🔓 Developer-Friendly Auth Toggle:** Disable authentication with `DISABLE_AUTH=true` for instant local testing.
+* **🌐 Web Ready:** Clean REST endpoints with CORS support, prepared for a React/Next.js frontend.
+
+---
+
+## 📂 Project Structure
 
 ```text
 .
-├── apps/
-│   ├── gateway-go/          # Go API Gateway + Embedded UI + SQLite
-│   │   ├── Dockerfile
-│   │   ├── main.go
-│   │   ├── go.mod
-│   │   └── internal/
-│   │       ├── auth/        # JWT generation & authentication middleware
-│   │       ├── db/          # SQLite driver initialization
-│   │       ├── handlers/    # API endpoints & proxy controller
-│   │       └── templates/   # Embedded HTML/JS frontend
-│   └── inference-py/        # Python GGUF LLM inference runner
-│       ├── Dockerfile
-│       ├── requirements.txt
-│       ├── models/          # Quantized GGUF model binaries
-│       └── app/
-│           └── main.py      # FastAPI server using llama-cpp-python
+├── cmd/
+│   └── mesh-mind/         # Binary entrypoint for the CLI
+├── internal/              # Shared CLI internal modules
+│   ├── cli/               # Cobra CLI commands (predict, register, login, history)
+│   ├── config/            # SQLite initialization (pure Go modernc.org/sqlite)
+│   └── store/             # Local SQLite Data Access Objects (Config & History)
+├── gateway/               # Go API Gateway
+│   ├── internal/auth/     # JWT authentication middleware & handlers
+│   └── internal/db/       # Gateway SQLite schema & user store
+├── models/                # Python ONNX inference services
+├── docker-compose.yml     # Multi-container orchestration
+└── README.md
 
 ```
 
 ---
 
-## 🛠️ Local Setup & Running
+## 🚀 Quick Start
 
-### Prerequisites
+### 1. Prerequisites
 
-- Go 1.22+
-- Python 3.10+
-- `curl`
+* **Go** (v1.21 or higher)
+* **Docker & Docker Compose** (for Gateway & Model services)
 
----
+### 2. Start the Gateway & Inference Workers
 
-### 1. Setup & Run `inference-py`
+Clone the repository and run the services with Docker Compose:
 
 ```bash
-cd apps/inference-py
-
-# Create & activate virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Download SmolLM2-135M-Instruct Q4_K_M GGUF model (~100 MB)
-mkdir -p models
-curl -L -o models/smollm2-135m-instruct-q4_k_m.gguf \
-  [https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf](https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf)
-
-# Start the inference server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+git clone [https://github.com/your-username/mesh-mind.git](https://github.com/your-username/mesh-mind.git)
+cd mesh-mind
+docker-compose up -d --build
 
 ```
 
-The inference server will start at `http://localhost:8000`.
+### 3. Build & Run the CLI
 
----
-
-### 2. Setup & Run `gateway-go`
-
-Open a new terminal window:
+Build the pure Go CLI binary (no CGO compiler required):
 
 ```bash
-cd apps/gateway-go
-
-# Download Go module dependencies
-go mod tidy
-
-# Start the API gateway and Web UI
-go run main.go
+go build -o mesh-mind ./cmd/mesh-mind
 
 ```
 
-The application will start at `http://localhost:8080`.
-
 ---
 
-## 🧪 Testing the Application
+## 💻 CLI Usage Walkthrough
 
-1. Open **`http://localhost:8080`** in your browser.
-2. **Register** a new user account (automatically receives **10 free tokens**).
-3. **Log in** with your credentials.
-4. Send a prompt to test the typing effect powered by `SmolLM2-135M`.
-5. Click **+ Buy 20 Dummy Tokens** to test SQLite-backed balance updates.
-
----
-
-## 🐳 Docker Deployment
-
-Both microservices include optimized Dockerfiles designed to minimize runtime overhead.
-
-### Build and Run `inference-py`
+### Step 1: Set Up Target Gateway URL
 
 ```bash
-cd apps/inference-py
-docker build -t mesh-mind-inference .
-docker run -p 8000:8000 mesh-mind-inference
+./mesh-mind config set-url http://localhost:8080
+# Output: ✔ Default Gateway URL set to: http://localhost:8080
 
 ```
 
-### Build and Run `gateway-go`
+### Step 2: Create an Account & Log In
 
 ```bash
-cd apps/gateway-go
-docker build -t mesh-mind-gateway .
-docker run -p 8080:8080 -e INFERENCE_URL="[http://host.docker.internal:8000](http://host.docker.internal:8000)" mesh-mind-gateway
+# Register a new user
+./mesh-mind register -u devuser -p supersecret
+# Output: ✔ Account created successfully!
+
+# Authenticate and receive a JWT token (saved to local SQLite)
+./mesh-mind login -u devuser -p supersecret
+# Output: ✔ Login successful!
+# Output: ✔ JWT token saved to local SQLite database (~/.mesh-mind/config.db)
+
+```
+
+### Step 3: Execute Model Predictions
+
+```bash
+./mesh-mind predict "Great customer service, solved my issue fast!"
+
+# 🧠 Model Output:
+#    Intent:     support
+#    Sentiment:  positive
+#    Model Used: onnx-sentiment-int8
+#    Latency:    18.40 ms
+# 
+# Saved to local SQLite history.
+
+```
+
+### Step 4: Query Local History (Offline)
+
+```bash
+./mesh-mind history --limit 5
+
+# 📜 Last 1 Local Predictions:
+# ---------------------------------------------------------------------
+# [2026-09-28 16:30:00] Text: "Great customer service, solved my issue fast!"
+#    └─ Intent: support | Sentiment: positive | Model: onnx-sentiment-int8 (18.4 ms)
 
 ```
 
 ---
 
-## ☁️ AWS Free Tier Deployment Guidelines (`t2.micro` / `t3.micro`)
+## 🔒 Security & Authentication
 
-1. **Enable Swap Memory:** AWS Free Tier micro instances only provide 1 GiB RAM. Enable a 2 GB swap file on the EC2 instance OS to prevent unexpected Out-Of-Memory (OOM) kills.
-2. **Pre-build Images Off-Server:** Build Docker images locally or via GitHub Actions and push them to **Amazon ECR**. Compiling Go code or installing C++ wheels inside a `t2.micro` will exhaust system memory.
-3. **Set Container Resource Limits in ECS:**
+* **Password Hashing:** User passwords are encrypted using `bcrypt` on the server before being saved to SQLite.
+* **Stateless Verification:** Model routes are secured via JWT bearer tokens signed with HS256 algorithm.
+* **Local Client Isolation:** Auth credentials and local query history remain inside the developer's home directory (`~/.mesh-mind/config.db`), preventing leakage between users.
+* **Bypass Auth for Testing:** Set the environment variable `DISABLE_AUTH=true` in `gateway/.env` to run the stack without authentication checks.
 
-- `inference-py`: Hard limit `384 MiB`
-- `gateway-go`: Hard limit `128 MiB`
+---
+
+## 🛣️ Roadmap
+
+* [x] Go API Gateway with JWT Auth
+* [x] Python ONNX Model Worker Integration
+* [x] Pure Go CLI with SQLite Persistent Storage
+* [ ] Add Web Dashboard (React/Next.js)
+* [ ] gRPC Transport between Gateway and ONNX Workers
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for details.
 
 ```
+
+<ElicitationsGroup message="Where would you like to go next with Mesh-Mind?">
+  <Elicitation label="Create a docker-compose.yml file for the Gateway and Python services" query="Create a complete docker-compose.yml file that spins up the Go Gateway and Python ONNX model workers with local persistent storage."/>
+  <Elicitation label="Add unit tests for the Go CLI and SQLite stores" query="Write unit tests for the CLI SQLite storage implementations in internal/store using Go's standard testing package."/>
+  <Elicitation label="Build a lightweight React frontend dashboard" query="Show me how to build a simple React single-page frontend that connects to the Go Gateway for real-time predictions."/>
+</ElicitationsGroup>
 
 ```
