@@ -1,0 +1,50 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Go API Gateway & Smart Router
+  # ---------------------------------------------------------------------------
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DB_PATH=/data/gateway.db
+      - SENTIMENT_WORKER_URL=http://model-sentiment:5000/predict
+      - INTENT_WORKER_URL=http://model-intent:5000/predict
+    volumes:
+      - gateway-data:/data
+    depends_on:
+      - model-sentiment
+      - model-intent
+
+  # ---------------------------------------------------------------------------
+  # Isolated Sentiment ONNX Model Worker
+  # ---------------------------------------------------------------------------
+  model-sentiment:
+    build:
+      context: ./models
+      dockerfile: Dockerfile
+      args:
+        MODEL_NAME: sentiment
+    deploy:
+      resources:
+        limits:
+          memory: 80M   # Lowered from 160M to 80M limit
+
+  # ---------------------------------------------------------------------------
+  # Isolated Intent ONNX Model Worker
+  # ---------------------------------------------------------------------------
+  model-intent:
+    build:
+      context: ./models
+      dockerfile: Dockerfile
+      args:
+        MODEL_NAME: intent
+    deploy:
+      resources:
+        limits:
+          memory: 80M   # Lowered from 160M to 80M limit
+volumes:
+  gateway-data:

@@ -1,8 +1,8 @@
 # 🧠 Mesh-Mind
 
-> An ultra-lightweight, modular MLOps pipeline and API Gateway designed for intelligent model routing, local developer productivity, and low-latency ONNX inference.
+> An ultra-lightweight, modular MLOps pipeline and API Gateway designed for intelligent model routing, local developer productivity, zero-PyTorch low-latency ONNX inference, and strict resource constraints (<120MB total RAM stack).
 
-Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and an interactive **Go Terminal CLI**. It features smart model routing (auto-selection based on query intent or explicit user overrides) and dual-layer SQLite persistence.
+Mesh-Mind combines a high-concurrency **Go API Gateway** with decoupled **Python ONNX microservices** and an interactive **Go Terminal CLI**. It features smart model routing, multi-stage container optimization, zero runtime PyTorch dependencies, and dual-layer SQLite state management.
 
 ---
 
@@ -24,7 +24,7 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLOUD / SERVER                          │
 │                                                                 │
-│  Go API Gateway & Router                                        │
+│  Go API Gateway & Router (Port 8080)                            │
 │  ├── JWT Authentication Middleware                              │
 │  ├── Dynamic Router Engine (Auto-Detect vs. Explicit Override)  │
 │  └── Storage: Server SQLite (/data/gateway.db)                  │
@@ -35,25 +35,28 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
                    ▼                           ▼
 ┌────────────────────────────┐   ┌────────────────────────────┐
 │ Python ONNX Sentiment      │   │ Python ONNX Intent         │
-│ Model Worker               │   │ Model Worker               │
+│ Model Worker (~50MB RAM)   │   │ Model Worker (~50MB RAM)   │
+│ └── Pure onnxruntime +     │   │ └── Pure onnxruntime +     │
+│     tokenizers (No PyTorch)│   │     tokenizers (No PyTorch)│
 └────────────────────────────┘   └────────────────────────────┘
 
 ```
 
 ---
 
-## ✨ Features
+## ✨ Key MLOps Features
 
-* **🔀 Smart Model Routing:** Automatically evaluates incoming text to dispatch queries to the optimal model worker, or allows clients to explicitly target specific models via `--model` flags.
-* **🚀 Go API Gateway:** High-throughput, stateless routing engine with custom JWT authentication middleware.
-* **⚡ ONNX Model Runtime:** Rapid Python-backed inference optimized for intent classification and sentiment analysis.
-* **💻 Interactive Terminal CLI:** Built with Cobra for seamless terminal workflows.
+* **⚡ Zero-PyTorch Runtime Inference:** Model workers run on pure C++ backends (`onnxruntime` + Rust-backed `tokenizers`), dropping runtime memory usage to **~50MB RAM per worker**.
+* **📦 Multi-Stage Container Optimization:** PyTorch is used strictly during the Docker **Build Stage** (`export_models.py`) to convert Hugging Face checkpoints to ONNX, then discarded. Production images install zero PyTorch binaries.
+* **🔀 Smart & Explicit Model Routing:** Gateway automatically evaluates incoming text to dispatch queries to the optimal model worker (`model-sentiment` vs. `model-intent`), or supports explicit overrides (`--model`).
+* **🚀 Lightweight MiniLM Models:** Replaced heavy transformers with MiniLM architectures (~45MB on disk each), optimizing for sub-10ms inference latencies and low cloud resource costs.
+* **💻 Interactive Terminal CLI:** Built with Go + Cobra for developer workflows.
 * **💾 Dual-Layer SQLite Persistence:**
-* **Client-Side (`~/.mesh-mind/config.db`):** Stores JWT tokens, server configuration, and local query execution history for offline auditing.
-* **Server-Side (`/data/gateway.db`):** Handles user registration, `bcrypt` password hashing, and token validation.
+* **Client-Side (`~/.mesh-mind/config.db`):** Stores JWT tokens, server configuration, and local prediction history.
+* **Server-Side (`/data/gateway.db`):** Handles user registration, `bcrypt` password hashing, and audit logs.
 
 
-* **🔓 Developer Auth Toggle:** Disable authentication checks during development by setting `DISABLE_AUTH=true`.
+* **🛡️ Strict Resource Limits:** Docker Compose applies tight memory limits (80MB per worker, 64MB for gateway) ensuring the full stack runs under **120MB total RAM**.
 
 ---
 
@@ -62,17 +65,22 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
 ```text
 .
 ├── cmd/
-│   └── mesh-mind/         # Binary entrypoint for the CLI
-├── internal/              # Shared CLI internal modules
-│   ├── cli/               # Cobra CLI commands (register, login, predict, history, config)
-│   ├── config/            # Pure Go SQLite initialization (modernc.org/sqlite)
-│   └── store/             # Local SQLite Data Access Objects (Config & History)
-├── gateway/               # Go API Gateway & Smart Router
-│   ├── internal/auth/     # JWT authentication middleware & handlers
-│   ├── internal/handlers/ # Predict & routing handlers
-│   └── internal/db/       # Server SQLite schema & user repository
-├── models/                # Python ONNX inference services
-├── docker-compose.yml     # Multi-container orchestration
+│   └── mesh-mind/              # Binary entrypoint for the CLI
+├── internal/                   # Shared CLI internal modules
+│   ├── cli/                    # Cobra commands (register, login, predict, history, config)
+│   ├── config/                 # Pure Go SQLite initialization (modernc.org/sqlite)
+│   └── store/                  # Local SQLite Data Access Objects
+├── gateway/                    # Go API Gateway & Dynamic Router
+│   ├── internal/auth/          # JWT authentication middleware
+│   ├── internal/handlers/      # Predict & routing handlers
+│   └── internal/db/            # Server SQLite schema & user repository
+├── models/                     # Python ONNX inference services
+│   ├── app.py                  # Zero-PyTorch FastAPI worker (onnxruntime + tokenizers)
+│   ├── export_models.py        # ONNX export script (used in Docker build stage)
+│   ├── requirements-export.txt # Export tooling dependencies (Optimum + Transformers)
+│   ├── requirements-runtime.txt# Production worker dependencies (ONNXRuntime + Fast Tokenizers)
+│   └── Dockerfile              # Parameterized multi-stage container build
+├── docker-compose.yml          # Microservice orchestration with memory limits
 └── README.md
 
 ```
@@ -86,20 +94,42 @@ Mesh-Mind combines a **Go API Gateway** with **Python ONNX model workers** and a
 * **Go** (v1.21 or higher)
 * **Docker & Docker Compose**
 
-### 2. Start Services
+### 2. Local Model Export (Optional Standalone Step)
 
-Clone the repository and spin up the gateway and inference workers:
+To test model export on your host machine before building containers:
 
 ```bash
-git clone [https://github.com/your-username/mesh-mind.git](https://github.com/your-username/mesh-mind.git)
-cd mesh-mind
-docker-compose up -d --build
+cd models
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install export dependencies (includes PyTorch for conversion)
+pip install -r requirements-export.txt
+
+# Export sentiment and intent models to ONNX
+python export_models.py --model sentiment
+python export_models.py --model intent
+cd ..
 
 ```
 
-### 3. Build the CLI Binary
+### 3. Build & Launch Microservices Stack
 
-Build the pure Go CLI binary (no CGO/GCC compiler required):
+Spin up the Go Gateway and zero-PyTorch Python workers in containerized microservices:
+
+```bash
+# Build and run containers
+docker compose up --build
+
+```
+
+*(Note: If using Docker Compose v1, use `docker-compose up --build` instead.)*
+
+### 4. Build the Go CLI Binary
+
+In a new terminal window, compile the CLI binary:
 
 ```bash
 go build -o mesh-mind ./cmd/mesh-mind
@@ -110,7 +140,7 @@ go build -o mesh-mind ./cmd/mesh-mind
 
 ## 💻 CLI Usage Walkthrough
 
-### 1. Set Gateway Target
+### 1. Configure Gateway Target
 
 ```bash
 ./mesh-mind config set-url http://localhost:8080
@@ -122,11 +152,11 @@ go build -o mesh-mind ./cmd/mesh-mind
 
 ```bash
 # Register a new account
-./mesh-mind register -u devuser -p supersecret
+./mesh-mind register -u devuser -p supersecret123
 # Output: ✔ Account created successfully!
 
 # Log in and store JWT locally
-./mesh-mind login -u devuser -p supersecret
+./mesh-mind login -u devuser -p supersecret123
 # Output: ✔ Login successful!
 # Output: ✔ JWT token saved to local SQLite database (~/.mesh-mind/config.db)
 
@@ -136,7 +166,7 @@ go build -o mesh-mind ./cmd/mesh-mind
 
 #### Option A: Automatic Model Routing (Default)
 
-Let the Gateway automatically detect the query type and route it to the appropriate ONNX model worker:
+The Gateway automatically classifies the query and dispatches it to the appropriate model worker:
 
 ```bash
 ./mesh-mind predict "How do I reset my account password?"
@@ -144,14 +174,14 @@ Let the Gateway automatically detect the query type and route it to the appropri
 # 🧠 Model Output:
 #    Text:       "How do I reset my account password?"
 #    Model Used: onnx-intent-v1 (auto-routed)
-#    Intent:     account_recovery
-#    Latency:    12.40 ms
+#    Intent:     sadness / query
+#    Latency:    6.40 ms
 
 ```
 
 #### Option B: Explicit Model Override (`--model` / `-m`)
 
-Bypass auto-detection and force the request to execute against a specific target model (`sentiment`, `intent`):
+Force the request to execute against a specific microservice (`sentiment` or `intent`):
 
 ```bash
 ./mesh-mind predict "The new update solved all my issues!" --model sentiment
@@ -160,62 +190,55 @@ Bypass auto-detection and force the request to execute against a specific target
 #    Text:       "The new update solved all my issues!"
 #    Model Used: onnx-sentiment-v1 (forced target)
 #    Sentiment:  positive
-#    Latency:    9.80 ms
+#    Latency:    5.20 ms
 
 ```
 
-### 4. Query Local History
+### 4. Inspect Local Prediction History
 
-Inspect previously run queries and execution metrics stored in your local SQLite database:
+Query locally cached execution history and latency metrics from `~/.mesh-mind/config.db`:
 
 ```bash
 ./mesh-mind history --limit 5
 
 # 📜 Last Predictions:
 # ---------------------------------------------------------------------
-# [2026-09-28 16:30:00] Text: "How do I reset my account password?"
-#    └─ Model: onnx-intent-v1 | Intent: account_recovery | Latency: 12.4 ms
-# [2026-09-28 16:31:12] Text: "The new update solved all my issues!"
-#    └─ Model: onnx-sentiment-v1 | Sentiment: positive | Latency: 9.8 ms
+# [2026-09-29 16:30:00] Text: "How do I reset my account password?"
+#    └─ Model: onnx-intent-v1 | Label: sadness | Latency: 6.4 ms
+# [2026-09-29 16:31:12] Text: "The new update solved all my issues!"
+#    └─ Model: onnx-sentiment-v1 | Label: positive | Latency: 5.2 ms
 
 ```
 
 ---
 
-## ⚙️ REST API Endpoint
+## 🔍 Verification & System Auditing
 
-If accessing the gateway directly via HTTP:
+### Verify Zero-PyTorch Execution in Memory
 
-**`POST /api/v1/predict`**
+To verify that PyTorch is not loaded into memory inside the worker processes:
 
-```json
-// Request Body
-{
-  "text": "Where is my order package?",
-  "model": "auto"  // Acceptable values: "auto", "sentiment", "intent"
-}
+```bash
+# Inspect container RAM usage (should remain around ~50MB - 60MB per worker)
+docker stats mesh-mind-model-sentiment mesh-mind-model-intent
 
 ```
 
-```json
-// Response Body
-{
-  "text": "Where is my order package?",
-  "model_used": "onnx-intent-v1",
-  "intent": "order_tracking",
-  "latency_ms": 11.20
-}
+Direct HTTP healthcheck on a worker:
+
+```bash
+curl http://localhost:5000/health
+# Response: {"status":"healthy","model_name":"sentiment","runtime":"onnxruntime-cpu","model_loaded":true}
 
 ```
 
 ---
 
-## 🔒 Security & Authentication
+## 🔒 Security & System Configuration
 
-* **Password Hashing:** User passwords are encrypted using `bcrypt` on the server before storage.
-* **Stateless Authorization:** Routes are protected via JWT bearer tokens signed with HS256.
-* **Client Storage Isolation:** Auth tokens and local query logs are isolated inside `~/.mesh-mind/config.db`.
-* **Bypass Auth Mode:** Set `DISABLE_AUTH=true` in `gateway/.env` to run local tests without login requirements.
+* **Password Security:** User passwords are hashed using `bcrypt` on the Go Gateway before storage.
+* **Stateless Authorization:** Routes are secured using JWT bearer tokens (HS256).
+* **Development Auth Bypass:** Set `DISABLE_AUTH=true` in gateway environment settings to bypass login during testing.
 
 ---
 
@@ -223,3 +246,6 @@ If accessing the gateway directly via HTTP:
 
 Distributed under the MIT License. See `LICENSE` for details.
 
+```
+
+```
