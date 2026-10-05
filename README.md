@@ -1,6 +1,6 @@
 # 🧠 Mesh-Mind
 
-> An ultra-lightweight, modular MLOps pipeline and API Gateway designed for intelligent model routing, local developer productivity, zero-PyTorch low-latency ONNX inference, and strict resource constraints (<120MB total RAM stack).
+> An ultra-lightweight, modular MLOps pipeline and API Gateway designed for intelligent model routing, local developer productivity, zero-PyTorch low-latency ONNX inference, and strict resource constraints.
 
 Mesh-Mind combines a high-concurrency **Go API Gateway** with decoupled **Python ONNX microservices** and an interactive **Go Terminal CLI**. It features smart model routing, multi-stage container optimization, zero runtime PyTorch dependencies, and dual-layer SQLite state management.
 
@@ -34,8 +34,8 @@ Mesh-Mind combines a high-concurrency **Go API Gateway** with decoupled **Python
                    ┌─────────────┴─────────────┐
                    ▼                           ▼
 ┌────────────────────────────┐   ┌────────────────────────────┐
-│ Python ONNX Sentiment      │   │ Python ONNX Intent         │
-│ Model Worker (~50MB RAM)   │   │ Model Worker (~50MB RAM)   │
+│ Python ONNX Sentiment      │   │ Python ONNX Intent/Emotion │
+│ Model Worker (256MB Limit) │   │ Model Worker (512MB Limit) │
 │ └── Pure onnxruntime +     │   │ └── Pure onnxruntime +     │
 │     tokenizers (No PyTorch)│   │     tokenizers (No PyTorch)│
 └────────────────────────────┘   └────────────────────────────┘
@@ -46,17 +46,18 @@ Mesh-Mind combines a high-concurrency **Go API Gateway** with decoupled **Python
 
 ## ✨ Key MLOps Features
 
-* **⚡ Zero-PyTorch Runtime Inference:** Model workers run on pure C++ backends (`onnxruntime` + Rust-backed `tokenizers`), dropping runtime memory usage to **~50MB RAM per worker**.
-* **📦 Multi-Stage Container Optimization:** PyTorch is used strictly during the Docker **Build Stage** (`export_models.py`) to convert Hugging Face checkpoints to ONNX, then discarded. Production images install zero PyTorch binaries.
-* **🔀 Smart & Explicit Model Routing:** Gateway automatically evaluates incoming text to dispatch queries to the optimal model worker (`model-sentiment` vs. `model-intent`), or supports explicit overrides (`--model`).
-* **🚀 Lightweight MiniLM Models:** Replaced heavy transformers with MiniLM architectures (~45MB on disk each), optimizing for sub-10ms inference latencies and low cloud resource costs.
+* **⚡ Zero-PyTorch Runtime Inference:** Model workers run on pure C++ backends (`onnxruntime` + Rust-backed `tokenizers`), dropping runtime memory usage dramatically while serving low-latency CPU predictions.
+* **📦 Multi-Stage Container Optimization:** PyTorch is used strictly during model conversion (`export_models.py`) to convert Hugging Face checkpoints to ONNX. Production worker images contain zero PyTorch/Torchvision binaries.
+* **🔀 Smart & Explicit Model Forwarding:** Go Gateway parses input text to route requests to the appropriate ONNX worker (`model-sentiment` vs. `model-intent`) or accepts target overrides (`--model`).
+* **🧠 Real Dynamic Logit Decoding:** Workers calculate softmax probability distributions over ONNX output tensors in real time and map class IDs to human-readable strings using dynamic `id2label` dictionary parsing with built-in fallbacks.
+* **🏥 Production Healthchecks & Startup Synchronization:** Docker Compose monitors FastAPI worker readiness via Uvicorn HTTP probes (`python3 -c urllib`), preventing gateway cold-start connection race conditions.
 * **💻 Interactive Terminal CLI:** Built with Go + Cobra for developer workflows.
 * **💾 Dual-Layer SQLite Persistence:**
 * **Client-Side (`~/.mesh-mind/config.db`):** Stores JWT tokens, server configuration, and local prediction history.
 * **Server-Side (`/data/gateway.db`):** Handles user registration, `bcrypt` password hashing, and audit logs.
 
 
-* **🛡️ Strict Resource Limits:** Docker Compose applies tight memory limits (80MB per worker, 64MB for gateway) ensuring the full stack runs under **120MB total RAM**.
+* **🛡️ Calibrated Container Memory Allocations:** Stack resource limits are finely tuned (64MB for Go Gateway, 256MB for MiniLM Sentiment, 512MB for BERT Emotion) to prevent OOM kills during initial model tensor load.
 
 ---
 
@@ -72,15 +73,15 @@ Mesh-Mind combines a high-concurrency **Go API Gateway** with decoupled **Python
 │   └── store/                  # Local SQLite Data Access Objects
 ├── gateway/                    # Go API Gateway & Dynamic Router
 │   ├── internal/auth/          # JWT authentication middleware
-│   ├── internal/handlers/      # Predict & routing handlers
+│   ├── internal/handlers/      # Predict & HTTP forwarding handlers
 │   └── internal/db/            # Server SQLite schema & user repository
 ├── models/                     # Python ONNX inference services
 │   ├── app.py                  # Zero-PyTorch FastAPI worker (onnxruntime + tokenizers)
-│   ├── export_models.py        # ONNX export script (used in Docker build stage)
+│   ├── export_models.py        # ONNX export script (MiniLM SST-2 & BERT Emotion)
 │   ├── requirements-export.txt # Export tooling dependencies (Optimum + Transformers)
 │   ├── requirements-runtime.txt# Production worker dependencies (ONNXRuntime + Fast Tokenizers)
 │   └── Dockerfile              # Parameterized multi-stage container build
-├── docker-compose.yml          # Microservice orchestration with memory limits
+├── docker-compose.yml          # Microservice orchestration, healthchecks & limits
 └── README.md
 
 ```
@@ -94,42 +95,36 @@ Mesh-Mind combines a high-concurrency **Go API Gateway** with decoupled **Python
 * **Go** (v1.21 or higher)
 * **Docker & Docker Compose**
 
-### 2. Local Model Export (Optional Standalone Step)
-
-To test model export on your host machine before building containers:
-
-```bash
-cd models
-
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install export dependencies (includes PyTorch for conversion)
-pip install -r requirements-export.txt
-
-# Export sentiment and intent models to ONNX
-python export_models.py --model sentiment
-python export_models.py --model intent
-cd ..
-
-```
-
-### 3. Build & Launch Microservices Stack
+### 2. Build & Launch Microservices Stack
 
 Spin up the Go Gateway and zero-PyTorch Python workers in containerized microservices:
 
 ```bash
-# Build and run containers
-docker compose up --build
+# Build and run containers in detached mode
+docker compose up -d --build
 
 ```
 
-*(Note: If using Docker Compose v1, use `docker-compose up --build` instead.)*
+Verify service readiness and container health status:
 
-### 4. Build the Go CLI Binary
+```bash
+docker compose ps
 
-In a new terminal window, compile the CLI binary:
+```
+
+*Expected output:*
+
+```text
+NAME                          SERVICE           STATUS
+mesh-mind-gateway-1           gateway           Up (healthy)
+mesh-mind-model-sentiment-1   model-sentiment   Up (healthy)
+mesh-mind-model-intent-1      model-intent      Up (healthy)
+
+```
+
+### 3. Build the Go CLI Binary
+
+Compile the CLI binary:
 
 ```bash
 go build -o mesh-mind ./cmd/mesh-mind
@@ -166,69 +161,55 @@ go build -o mesh-mind ./cmd/mesh-mind
 
 #### Option A: Automatic Model Routing (Default)
 
-The Gateway automatically classifies the query and dispatches it to the appropriate model worker:
+The Gateway automatically evaluates the query and forwards it to the sentiment worker:
 
 ```bash
-./mesh-mind predict "How do I reset my account password?"
+./mesh-mind predict "I hate Milk"
 
-# 🧠 Model Output:
-#    Text:       "How do I reset my account password?"
-#    Model Used: onnx-intent-v1 (auto-routed)
-#    Intent:     sadness / query
-#    Latency:    6.40 ms
+# 🧠 Model Response:
+# {"text":"I hate Milk","model_used":"onnx-sentiment-v1","sentiment":"negative","latency_ms":54.48}
+
+```
+
+```bash
+./mesh-mind predict "I love milk"
+
+# 🧠 Model Response:
+# {"text":"I love milk","model_used":"onnx-sentiment-v1","sentiment":"positive","latency_ms":3.12}
 
 ```
 
 #### Option B: Explicit Model Override (`--model` / `-m`)
 
-Force the request to execute against a specific microservice (`sentiment` or `intent`):
+Force execution against the BERT Emotion/Intent classification microservice (`model-intent`):
 
 ```bash
-./mesh-mind predict "The new update solved all my issues!" --model sentiment
+./mesh-mind predict "How do I reset my account password?" --model intent
 
-# 🧠 Model Output:
-#    Text:       "The new update solved all my issues!"
-#    Model Used: onnx-sentiment-v1 (forced target)
-#    Sentiment:  positive
-#    Latency:    5.20 ms
-
-```
-
-### 4. Inspect Local Prediction History
-
-Query locally cached execution history and latency metrics from `~/.mesh-mind/config.db`:
-
-```bash
-./mesh-mind history --limit 5
-
-# 📜 Last Predictions:
-# ---------------------------------------------------------------------
-# [2026-09-29 16:30:00] Text: "How do I reset my account password?"
-#    └─ Model: onnx-intent-v1 | Label: sadness | Latency: 6.4 ms
-# [2026-09-29 16:31:12] Text: "The new update solved all my issues!"
-#    └─ Model: onnx-sentiment-v1 | Label: positive | Latency: 5.2 ms
+# 🧠 Model Response:
+# {"text":"How do I reset my account password?","model_used":"onnx-intent-v1","intent":"anger","latency_ms":179.96}
 
 ```
 
 ---
 
-## 🔍 Verification & System Auditing
+## 🔍 Observability & Live Monitoring
 
-### Verify Zero-PyTorch Execution in Memory
+### Stream Live Gateway & Worker Forwarding Logs
 
-To verify that PyTorch is not loaded into memory inside the worker processes:
+Watch incoming HTTP requests and ONNX runtime executions in real time:
 
 ```bash
-# Inspect container RAM usage (should remain around ~50MB - 60MB per worker)
-docker stats mesh-mind-model-sentiment mesh-mind-model-intent
+docker compose logs -f gateway model-sentiment model-intent
 
 ```
 
-Direct HTTP healthcheck on a worker:
+### Verify Container Resource Usage
+
+Check live RAM utilization across running containers:
 
 ```bash
-curl http://localhost:5000/health
-# Response: {"status":"healthy","model_name":"sentiment","runtime":"onnxruntime-cpu","model_loaded":true}
+docker stats
 
 ```
 
@@ -238,7 +219,7 @@ curl http://localhost:5000/health
 
 * **Password Security:** User passwords are hashed using `bcrypt` on the Go Gateway before storage.
 * **Stateless Authorization:** Routes are secured using JWT bearer tokens (HS256).
-* **Development Auth Bypass:** Set `DISABLE_AUTH=true` in gateway environment settings to bypass login during testing.
+* **Development Auth Bypass:** Set `DISABLE_AUTH=true` in gateway environment settings to bypass login during rapid testing.
 
 ---
 

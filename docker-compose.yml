@@ -1,7 +1,4 @@
 services:
-  # ---------------------------------------------------------------------------
-  # Go API Gateway & Smart Router
-  # ---------------------------------------------------------------------------
   gateway:
     build:
       context: .
@@ -16,44 +13,50 @@ services:
     volumes:
       - gateway-data:/data
     depends_on:
-      - model-sentiment
-      - model-intent
+      model-sentiment:
+        condition: service_healthy
+      model-intent:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          memory: 32M
+          memory: 64M
 
-  # ---------------------------------------------------------------------------
-  # Isolated Sentiment ONNX Model Worker
-  # ---------------------------------------------------------------------------
   model-sentiment:
     build:
       context: ./models
       dockerfile: Dockerfile
       args:
         MODEL_NAME: sentiment
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:5000/docs\")' || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 256M
         reservations:
           memory: 64M
 
-  # ---------------------------------------------------------------------------
-  # Isolated Intent ONNX Model Worker
-  # ---------------------------------------------------------------------------
   model-intent:
     build:
       context: ./models
       dockerfile: Dockerfile
       args:
         MODEL_NAME: intent
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:5000/docs\")' || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 512M
         reservations:
-          memory: 64M
+          memory: 128M
 
 volumes:
   gateway-data:
