@@ -18,6 +18,10 @@ services:
     depends_on:
       - model-sentiment
       - model-intent
+    deploy:
+      resources:
+        limits:
+          memory: 32M
 
   # ---------------------------------------------------------------------------
   # Isolated Sentiment ONNX Model Worker
@@ -31,7 +35,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 80M   # Lowered from 160M to 80M limit
+          memory: 128M
+        reservations:
+          memory: 64M
 
   # ---------------------------------------------------------------------------
   # Isolated Intent ONNX Model Worker
@@ -45,6 +51,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 80M   # Lowered from 160M to 80M limit
+          memory: 128M
+        reservations:
+          memory: 64M
+
 volumes:
   gateway-data:
